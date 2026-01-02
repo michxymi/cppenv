@@ -63,6 +63,13 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		fmt.Println("Added .cppenv/ to .gitignore")
 	}
 
+	// Create conan_provider.cmake if it doesn't exist
+	if created, err := environment.CreateConanProvider(); err != nil {
+		return fmt.Errorf("failed to create conan_provider.cmake: %w", err)
+	} else if created {
+		fmt.Println("Created conan_provider.cmake in .cppenv/")
+	}
+
 	// Create CMakeUserPresets.json if it doesn't exist
 	if created, err := environment.CreateCMakeUserPresets(); err != nil {
 		return fmt.Errorf("failed to create CMakeUserPresets.json: %w", err)

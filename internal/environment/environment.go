@@ -1,6 +1,7 @@
 package environment
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,9 @@ import (
 	"runtime"
 	"strings"
 )
+
+//go:embed conan_provider.cmake
+var conanProviderContent []byte
 
 const VenvDir = ".cppenv"
 
@@ -341,6 +345,28 @@ func CreateCMakeUserPresets() (bool, error) {
 
 	if err := os.WriteFile(presetsPath, jsonData, 0644); err != nil {
 		return false, fmt.Errorf("failed to write CMakeUserPresets.json: %w", err)
+	}
+
+	return true, nil
+}
+
+// CreateConanProvider creates conan_provider.cmake in the .cppenv directory
+// Returns true if it was created, false if already exists
+func CreateConanProvider() (bool, error) {
+	cppenvDir := GetCppenvDir()
+	if err := os.MkdirAll(cppenvDir, 0755); err != nil {
+		return false, fmt.Errorf("failed to create .cppenv directory: %w", err)
+	}
+
+	providerPath := filepath.Join(cppenvDir, "conan_provider.cmake")
+
+	// Check if file already exists
+	if _, err := os.Stat(providerPath); err == nil {
+		return false, nil // Already exists
+	}
+
+	if err := os.WriteFile(providerPath, conanProviderContent, 0644); err != nil {
+		return false, fmt.Errorf("failed to write conan_provider.cmake: %w", err)
 	}
 
 	return true, nil
