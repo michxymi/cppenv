@@ -1,0 +1,19 @@
+[project]
+name = "example"
+
+[tools]
+cmake = "4.2.1"
+ninja = "1.13.0"
+conan = "2.24.0"
+ziglang = "0.15.1"
+clang-tools = "0.16.0"
+
+[scripts]
+configure = "cmake -B build --preset=cppenv"
+build = "cmake --build build"
+run = "./build/example"
+clean = "rm -rf build"
+format = "clang-format -i src/*.cpp"
+check-format = "clang-format --dry-run --Werror src/*.cpp"
+tidy = "clang-tidy -p build src/*.cpp"
+fix-tidy = "clang-tidy -p build --fix src/*.cpp"
