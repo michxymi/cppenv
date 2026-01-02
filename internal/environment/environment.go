@@ -1,7 +1,6 @@
 package environment
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -56,8 +55,6 @@ func Create(pythonPath string) error {
 	}
 
 	cmd := exec.Command(pythonPath, "-m", "venv", venvPath)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to create venv: %w", err)
 	}
@@ -71,15 +68,11 @@ func InstallTools(reqs []string) error {
 
 	// Upgrade pip first
 	cmd := exec.Command(pip, "install", "--upgrade", "pip")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	cmd.Run() // Ignore errors on pip upgrade
 
 	// Install all requirements
 	args := append([]string{"install"}, reqs...)
 	cmd = exec.Command(pip, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to install tools: %w", err)
 	}
@@ -278,48 +271,52 @@ set(CMAKE_CXX_COMPILER_ID "Clang")
 }
 
 // AddToGitignore adds .cppenv/ to .gitignore if not already present
-func AddToGitignore() error {
+// Returns true if it was added, false if already present
+func AddToGitignore() (bool, error) {
 	cwd, _ := os.Getwd()
 	gitignorePath := filepath.Join(cwd, ".gitignore")
 
-	// Check if .gitignore exists and already has .cppenv
-	if f, err := os.Open(gitignorePath); err == nil {
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
+	// Read existing content to check if .cppenv is already present
+	content, err := os.ReadFile(gitignorePath)
+	if err == nil {
+		lines := strings.Split(string(content), "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
 			if line == ".cppenv" || line == ".cppenv/" {
-				f.Close()
-				return nil // Already present
+				return false, nil // Already present
 			}
 		}
-		f.Close()
 	}
 
 	// Append to .gitignore
 	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer f.Close()
 
-	// Check if file is empty or ends with newline
-	info, _ := f.Stat()
-	if info.Size() > 0 {
-		// Add newline before entry if file doesn't end with one
+	// Add newline before entry if file has content and doesn't end with newline
+	if len(content) > 0 && content[len(content)-1] != '\n' {
 		f.WriteString("\n")
 	}
 	_, err = f.WriteString(".cppenv/\n")
-	return err
+	return err == nil, err
 }
 
 // CreateCMakeUserPresets creates CMakeUserPresets.json in the .cppenv directory
-func CreateCMakeUserPresets() error {
+// Returns true if it was created, false if already exists
+func CreateCMakeUserPresets() (bool, error) {
 	cppenvDir := GetCppenvDir()
 	if err := os.MkdirAll(cppenvDir, 0755); err != nil {
-		return fmt.Errorf("failed to create .cppenv directory: %w", err)
+		return false, fmt.Errorf("failed to create .cppenv directory: %w", err)
 	}
 
 	presetsPath := filepath.Join(cppenvDir, "CMakeUserPresets.json")
+
+	// Check if file already exists
+	if _, err := os.Stat(presetsPath); err == nil {
+		return false, nil // Already exists
+	}
 
 	presets := map[string]interface{}{
 		"version": 6,
@@ -339,12 +336,12 @@ func CreateCMakeUserPresets() error {
 
 	jsonData, err := json.MarshalIndent(presets, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal JSON: %w", err)
+		return false, fmt.Errorf("failed to marshal JSON: %w", err)
 	}
 
 	if err := os.WriteFile(presetsPath, jsonData, 0644); err != nil {
-		return fmt.Errorf("failed to write CMakeUserPresets.json: %w", err)
+		return false, fmt.Errorf("failed to write CMakeUserPresets.json: %w", err)
 	}
 
-	return nil
+	return true, nil
 }
