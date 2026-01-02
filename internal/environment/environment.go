@@ -67,7 +67,8 @@ func Create(pythonPath string) error {
 }
 
 // InstallTools installs the given requirements into the venv
-func InstallTools(reqs []string) error {
+// tools is the map of tool names to versions from config
+func InstallTools(reqs []string, tools map[string]string) error {
 	pip := GetPip()
 
 	// Upgrade pip first
@@ -83,6 +84,13 @@ func InstallTools(reqs []string) error {
 
 	// Create symlinks for tools that don't put binaries in bin/
 	createToolSymlinks()
+
+	// Install clang-tools binaries if clang-tools is in the config
+	if _, hasClangTools := tools["clang-tools"]; hasClangTools {
+		if err := installClangToolsBinaries(); err != nil {
+			return fmt.Errorf("failed to install clang-tools binaries: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -147,6 +155,30 @@ func createZigWrapperScripts(targetDir, zigPath string) {
 		os.WriteFile(ccPath, []byte(ccContent), 0755)
 		os.WriteFile(cxxPath, []byte(cxxContent), 0755)
 	}
+}
+
+// installClangToolsBinaries runs 'clang-tools --install' to download clang binaries
+// Uses version 19 by default (latest stable LLVM release)
+func installClangToolsBinaries() error {
+	binPath := GetBinPath()
+	clangToolsPath := filepath.Join(binPath, "clang-tools")
+	if runtime.GOOS == "windows" {
+		clangToolsPath = filepath.Join(binPath, "clang-tools.exe")
+	}
+
+	// Check if clang-tools CLI exists
+	if _, err := os.Stat(clangToolsPath); os.IsNotExist(err) {
+		return fmt.Errorf("clang-tools CLI not found at %s", clangToolsPath)
+	}
+
+	// Install clang binaries (version 19 is latest stable)
+	cmd := exec.Command(clangToolsPath, "--install", "19", "--directory", binPath)
+	cmd.Env = GetActivatedEnv()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run clang-tools --install: %w", err)
+	}
+
+	return nil
 }
 
 // GetActivatedEnv returns environment variables with PATH prepended

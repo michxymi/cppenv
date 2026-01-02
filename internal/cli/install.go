@@ -52,7 +52,7 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	for _, req := range reqs {
 		fmt.Printf("  %s\n", req)
 	}
-	if err := environment.InstallTools(reqs); err != nil {
+	if err := environment.InstallTools(reqs, cfg.Tools); err != nil {
 		return err
 	}
 
