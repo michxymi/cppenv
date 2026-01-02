@@ -57,18 +57,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 	}
 
 	// Update .gitignore
-	if err := environment.AddToGitignore(); err != nil {
+	if added, err := environment.AddToGitignore(); err != nil {
 		fmt.Printf("Warning: could not update .gitignore: %v\n", err)
-	} else {
+	} else if added {
 		fmt.Println("Added .cppenv/ to .gitignore")
 	}
 
-	// Create CMakeUserPresets.json
-	fmt.Println("\nCreating CMakeUserPresets.json...")
-	if err := environment.CreateCMakeUserPresets(); err != nil {
+	// Create CMakeUserPresets.json if it doesn't exist
+	if created, err := environment.CreateCMakeUserPresets(); err != nil {
 		return fmt.Errorf("failed to create CMakeUserPresets.json: %w", err)
+	} else if created {
+		fmt.Println("Created CMakeUserPresets.json in .cppenv/")
 	}
-	fmt.Println("CMakeUserPresets.json created in .cppenv/")
 
 	fmt.Println("\nDone! You can now use 'cppenv run <command>' to run tools.")
 	return nil
