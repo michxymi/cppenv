@@ -2,6 +2,7 @@ package environment
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,10 +13,15 @@ import (
 
 const VenvDir = ".cppenv"
 
+// GetCppenvDir returns the path to the .cppenv directory
+func GetCppenvDir() string {
+	cwd, _ := os.Getwd()
+	return filepath.Join(cwd, VenvDir)
+}
+
 // GetVenvPath returns the path to the venv directory
 func GetVenvPath() string {
-	cwd, _ := os.Getwd()
-	return filepath.Join(cwd, VenvDir, "venv")
+	return filepath.Join(GetCppenvDir(), "venv")
 }
 
 // GetBinPath returns the path to the venv bin/Scripts directory
@@ -114,14 +120,18 @@ func createToolSymlinks() {
 			os.Symlink(zigSource, zigTarget)
 		}
 		// Create zig-cc and zig-c++ wrapper scripts for CMake/Conan compatibility
-		createZigWrapperScripts(binPath, zigTarget)
+		// Place them in .cppenv directory, not in venv/bin
+		cppenvDir := GetCppenvDir()
+		os.MkdirAll(cppenvDir, 0755)
+		createZigWrapperScripts(cppenvDir, zigTarget)
 	}
 }
 
 // createZigWrapperScripts creates zig-cc and zig-c++ wrapper scripts
 // These are needed because CMake/Conan need to invoke "zig cc" and "zig c++"
 // but they expect a single executable path
-func createZigWrapperScripts(binPath, zigPath string) {
+// targetDir is the directory where the wrappers should be created (.cppenv directory)
+func createZigWrapperScripts(targetDir, zigPath string) {
 	// Convert to forward slashes for shell scripts
 	zigPath = strings.ReplaceAll(zigPath, "\\", "/")
 
@@ -129,14 +139,14 @@ func createZigWrapperScripts(binPath, zigPath string) {
 		// Create batch files on Windows
 		ccContent := fmt.Sprintf("@echo off\r\n\"%s\" cc %%*\r\n", zigPath)
 		cxxContent := fmt.Sprintf("@echo off\r\n\"%s\" c++ %%*\r\n", zigPath)
-		os.WriteFile(filepath.Join(binPath, "zig-cc.bat"), []byte(ccContent), 0755)
-		os.WriteFile(filepath.Join(binPath, "zig-c++.bat"), []byte(cxxContent), 0755)
+		os.WriteFile(filepath.Join(targetDir, "zig-cc.bat"), []byte(ccContent), 0755)
+		os.WriteFile(filepath.Join(targetDir, "zig-c++.bat"), []byte(cxxContent), 0755)
 	} else {
 		// Create shell scripts on Unix
 		ccContent := fmt.Sprintf("#!/bin/sh\nexec \"%s\" cc \"$@\"\n", zigPath)
 		cxxContent := fmt.Sprintf("#!/bin/sh\nexec \"%s\" c++ \"$@\"\n", zigPath)
-		ccPath := filepath.Join(binPath, "zig-cc")
-		cxxPath := filepath.Join(binPath, "zig-c++")
+		ccPath := filepath.Join(targetDir, "zig-cc")
+		cxxPath := filepath.Join(targetDir, "zig-c++")
 		os.WriteFile(ccPath, []byte(ccContent), 0755)
 		os.WriteFile(cxxPath, []byte(cxxContent), 0755)
 	}
@@ -219,18 +229,32 @@ func RunCommand(args []string) int {
 }
 
 // CreateToolchainFile generates the CMake toolchain file for Zig
-func CreateToolchainFile() (string, error) {
-	cwd, _ := os.Getwd()
-	toolchainPath := filepath.Join(cwd, VenvDir, "zig-toolchain.cmake")
+// If targetDir is empty, uses the current working directory
+func CreateToolchainFile(targetDir string) (string, error) {
+	if targetDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("failed to get current directory: %w", err)
+		}
+		targetDir = cwd
+	}
 
-	binPath := GetBinPath()
+	// Ensure .cppenv directory exists in target directory
+	cppenvDir := filepath.Join(targetDir, VenvDir)
+	if err := os.MkdirAll(cppenvDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create .cppenv directory: %w", err)
+	}
+
+	toolchainPath := filepath.Join(cppenvDir, "zig_toolchain.cmake")
+
+	// Wrappers are now in .cppenv directory, not in venv/bin
 	var zigCCPath, zigCXXPath string
 	if runtime.GOOS == "windows" {
-		zigCCPath = filepath.Join(binPath, "zig-cc.bat")
-		zigCXXPath = filepath.Join(binPath, "zig-c++.bat")
+		zigCCPath = filepath.Join(cppenvDir, "zig-cc.bat")
+		zigCXXPath = filepath.Join(cppenvDir, "zig-c++.bat")
 	} else {
-		zigCCPath = filepath.Join(binPath, "zig-cc")
-		zigCXXPath = filepath.Join(binPath, "zig-c++")
+		zigCCPath = filepath.Join(cppenvDir, "zig-cc")
+		zigCXXPath = filepath.Join(cppenvDir, "zig-c++")
 	}
 
 	// Convert to forward slashes for CMake
@@ -286,4 +310,41 @@ func AddToGitignore() error {
 	}
 	_, err = f.WriteString(".cppenv/\n")
 	return err
+}
+
+// CreateCMakeUserPresets creates CMakeUserPresets.json in the .cppenv directory
+func CreateCMakeUserPresets() error {
+	cppenvDir := GetCppenvDir()
+	if err := os.MkdirAll(cppenvDir, 0755); err != nil {
+		return fmt.Errorf("failed to create .cppenv directory: %w", err)
+	}
+
+	presetsPath := filepath.Join(cppenvDir, "CMakeUserPresets.json")
+
+	presets := map[string]interface{}{
+		"version": 6,
+		"configurePresets": []map[string]interface{}{
+			{
+				"name":      "cppenv",
+				"generator": "Ninja",
+				"binaryDir": "${sourceDir}/build",
+				"cacheVariables": map[string]interface{}{
+					"CMAKE_PROJECT_TOP_LEVEL_INCLUDES": "${sourceDir}/.cppenv/conan_provider.cmake",
+					"CMAKE_C_COMPILER":                 "${sourceDir}/.cppenv/zig-cc",
+					"CMAKE_CXX_COMPILER":               "${sourceDir}/.cppenv/zig-c++",
+				},
+			},
+		},
+	}
+
+	jsonData, err := json.MarshalIndent(presets, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	if err := os.WriteFile(presetsPath, jsonData, 0644); err != nil {
+		return fmt.Errorf("failed to write CMakeUserPresets.json: %w", err)
+	}
+
+	return nil
 }

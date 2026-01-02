@@ -22,5 +22,4 @@ func init() {
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(statusCmd)
-	rootCmd.AddCommand(toolchainCmd)
 }
